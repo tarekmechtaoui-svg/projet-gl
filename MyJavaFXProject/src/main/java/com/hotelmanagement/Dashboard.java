@@ -10,6 +10,7 @@ import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
@@ -35,18 +36,31 @@ public class Dashboard {
 
         tabPane.getTabs().addAll(roomsTab, reservationsTab, customersTab);
 
-        // --- Logout button ---
         Button logoutButton = new Button("Logout");
+        logoutButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 25; -fx-cursor: hand;");
         logoutButton.setOnAction(e -> {
             LoginPage loginPage = new LoginPage();
             loginPage.start(stage);
         });
 
-        BorderPane root = new BorderPane();
-        root.setTop(logoutButton);
-        root.setCenter(tabPane);
+        Label titleLabel = new Label("Hotel Management System");
+        titleLabel.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: #2196F3;");
 
-        Scene scene = new Scene(root, 800, 600);
+        HBox topBar = new HBox();
+        topBar.setSpacing(10);
+        topBar.setStyle("-fx-padding: 15; -fx-background-color: #ffffff; -fx-border-color: #e0e0e0; -fx-border-width: 0 0 2 0;");
+        topBar.getChildren().addAll(titleLabel, new javafx.scene.layout.Region());
+        HBox.setHgrow(topBar.getChildren().get(1), javafx.geometry.Priority.ALWAYS);
+        topBar.getChildren().add(logoutButton);
+
+        tabPane.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
+
+        BorderPane root = new BorderPane();
+        root.setTop(topBar);
+        root.setCenter(tabPane);
+        root.setStyle("-fx-background-color: #fafafa;");
+
+        Scene scene = new Scene(root, 1000, 700);
         stage.setScene(scene);
         stage.show();
     }
@@ -55,32 +69,173 @@ public class Dashboard {
     private BorderPane createRoomsTab() {
         TableView<Room> table = new TableView<>();
         ObservableList<Room> data = getRoomsFromDB();
+        ObservableList<Room> filteredData = FXCollections.observableArrayList(data);
 
         TableColumn<Room, Integer> colNumber = new TableColumn<>("Room Number");
         colNumber.setCellValueFactory(new PropertyValueFactory<>("number"));
+        colNumber.setPrefWidth(150);
 
         TableColumn<Room, String> colType = new TableColumn<>("Type");
         colType.setCellValueFactory(new PropertyValueFactory<>("type"));
+        colType.setPrefWidth(150);
 
         TableColumn<Room, Boolean> colAvailable = new TableColumn<>("Available");
         colAvailable.setCellValueFactory(new PropertyValueFactory<>("available"));
+        colAvailable.setPrefWidth(120);
 
-        table.setItems(data);
+        table.setItems(filteredData);
         table.getColumns().addAll(colNumber, colType, colAvailable);
+        table.setStyle("-fx-font-size: 13px;");
 
-        Button addButton = new Button("Add Room");
+        Button addButton = new Button("+ Add Room");
+        addButton.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 20; -fx-cursor: hand;");
+        addButton.setOnAction(e -> handleAddRoom(table, data, filteredData));
+
         Button editButton = new Button("Edit Room");
-        Button deleteButton = new Button("Delete Room");
-        TextField searchField = new TextField();
-        searchField.setPromptText("Search...");
+        editButton.setStyle("-fx-background-color: #FF9800; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 20; -fx-cursor: hand;");
+        editButton.setOnAction(e -> handleEditRoom(table, data, filteredData));
 
-        HBox controls = new HBox(10, addButton, editButton, deleteButton, searchField);
+        Button deleteButton = new Button("Delete Room");
+        deleteButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 20; -fx-cursor: hand;");
+        deleteButton.setOnAction(e -> handleDeleteRoom(table, data, filteredData));
+
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search by room number or type...");
+        searchField.setPrefWidth(250);
+        searchField.setStyle("-fx-padding: 10; -fx-font-size: 13px;");
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            filterRooms(newVal, data, filteredData);
+        });
+
+        HBox controls = new HBox(15, addButton, editButton, deleteButton, searchField);
+        controls.setStyle("-fx-padding: 15; -fx-background-color: #f5f5f5;");
 
         BorderPane pane = new BorderPane();
         pane.setTop(controls);
         pane.setCenter(table);
+        pane.setStyle("-fx-background-color: white;");
 
         return pane;
+    }
+
+    private void handleAddRoom(TableView<Room> table, ObservableList<Room> data, ObservableList<Room> filteredData) {
+        Stage stage = (Stage) table.getScene().getWindow();
+        RoomDialog dialog = new RoomDialog(stage, null);
+        dialog.showAndWait();
+
+        if (dialog.isConfirmed()) {
+            try (Connection conn = Database.getConnection()) {
+                String sql = "INSERT INTO rooms (number, type, available) VALUES (?, ?, ?)";
+                PreparedStatement pstmt = conn.prepareStatement(sql);
+                pstmt.setInt(1, dialog.getRoomNumber());
+                pstmt.setString(2, dialog.getRoomType());
+                pstmt.setBoolean(3, dialog.isAvailable());
+                pstmt.executeUpdate();
+
+                Room newRoom = new Room(dialog.getRoomNumber(), dialog.getRoomType(), dialog.isAvailable());
+                data.add(newRoom);
+                filteredData.add(newRoom);
+
+                showSuccess("Room added successfully!");
+            } catch (Exception e) {
+                showError("Error adding room: " + e.getMessage());
+            }
+        }
+    }
+
+    private void handleEditRoom(TableView<Room> table, ObservableList<Room> data, ObservableList<Room> filteredData) {
+        Room selectedRoom = table.getSelectionModel().getSelectedItem();
+        if (selectedRoom == null) {
+            showError("Please select a room to edit!");
+            return;
+        }
+
+        Stage stage = (Stage) table.getScene().getWindow();
+        RoomDialog dialog = new RoomDialog(stage, selectedRoom.getNumber());
+        dialog.showAndWait();
+
+        if (dialog.isConfirmed()) {
+            try (Connection conn = Database.getConnection()) {
+                String sql = "UPDATE rooms SET type = ?, available = ? WHERE number = ?";
+                PreparedStatement pstmt = conn.prepareStatement(sql);
+                pstmt.setString(1, dialog.getRoomType());
+                pstmt.setBoolean(2, dialog.isAvailable());
+                pstmt.setInt(3, selectedRoom.getNumber());
+                pstmt.executeUpdate();
+
+                data.remove(selectedRoom);
+                filteredData.remove(selectedRoom);
+                Room updatedRoom = new Room(selectedRoom.getNumber(), dialog.getRoomType(), dialog.isAvailable());
+                data.add(updatedRoom);
+                filteredData.add(updatedRoom);
+
+                showSuccess("Room updated successfully!");
+            } catch (Exception e) {
+                showError("Error updating room: " + e.getMessage());
+            }
+        }
+    }
+
+    private void handleDeleteRoom(TableView<Room> table, ObservableList<Room> data, ObservableList<Room> filteredData) {
+        Room selectedRoom = table.getSelectionModel().getSelectedItem();
+        if (selectedRoom == null) {
+            showError("Please select a room to delete!");
+            return;
+        }
+
+        Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmAlert.setTitle("Confirm Deletion");
+        confirmAlert.setHeaderText("Delete Room #" + selectedRoom.getNumber());
+        confirmAlert.setContentText("Are you sure you want to delete this room? This action cannot be undone.");
+
+        confirmAlert.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                try (Connection conn = Database.getConnection()) {
+                    String sql = "DELETE FROM rooms WHERE number = ?";
+                    PreparedStatement pstmt = conn.prepareStatement(sql);
+                    pstmt.setInt(1, selectedRoom.getNumber());
+                    pstmt.executeUpdate();
+
+                    data.remove(selectedRoom);
+                    filteredData.remove(selectedRoom);
+
+                    showSuccess("Room deleted successfully!");
+                } catch (Exception e) {
+                    showError("Error deleting room: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void filterRooms(String searchText, ObservableList<Room> data, ObservableList<Room> filteredData) {
+        filteredData.clear();
+        if (searchText == null || searchText.trim().isEmpty()) {
+            filteredData.addAll(data);
+        } else {
+            String lowerSearch = searchText.toLowerCase();
+            for (Room room : data) {
+                if (String.valueOf(room.getNumber()).contains(lowerSearch) ||
+                    room.getType().toLowerCase().contains(lowerSearch)) {
+                    filteredData.add(room);
+                }
+            }
+        }
+    }
+
+    private void showSuccess(String message) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Success");
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    private void showError(String message) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle("Error");
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
     }
 
     private ObservableList<Room> getRoomsFromDB() {
