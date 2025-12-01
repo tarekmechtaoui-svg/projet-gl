@@ -466,32 +466,162 @@ public class Dashboard {
     private BorderPane createCustomersTab() {
         TableView<Customer> table = new TableView<>();
         ObservableList<Customer> data = getCustomersFromDB();
+        ObservableList<Customer> filteredData = FXCollections.observableArrayList(data);
 
         TableColumn<Customer, Integer> colId = new TableColumn<>("ID");
         colId.setCellValueFactory(new PropertyValueFactory<>("id"));
+        colId.setPrefWidth(80);
 
         TableColumn<Customer, String> colName = new TableColumn<>("Name");
         colName.setCellValueFactory(new PropertyValueFactory<>("name"));
+        colName.setPrefWidth(150);
 
         TableColumn<Customer, String> colEmail = new TableColumn<>("Email");
         colEmail.setCellValueFactory(new PropertyValueFactory<>("email"));
+        colEmail.setPrefWidth(200);
 
-        table.setItems(data);
+        table.setItems(filteredData);
         table.getColumns().addAll(colId, colName, colEmail);
+        table.setStyle("-fx-font-size: 13px;");
 
-        Button addButton = new Button("Add Customer");
+        Button addButton = new Button("+ Add Customer");
+        addButton.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 20; -fx-cursor: hand;");
+        addButton.setOnAction(e -> handleAddCustomer(table, data, filteredData));
+
         Button editButton = new Button("Edit Customer");
-        Button deleteButton = new Button("Delete Customer");
-        TextField searchField = new TextField();
-        searchField.setPromptText("Search...");
+        editButton.setStyle("-fx-background-color: #FF9800; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 20; -fx-cursor: hand;");
+        editButton.setOnAction(e -> handleEditCustomer(table, data, filteredData));
 
-        HBox controls = new HBox(10, addButton, editButton, deleteButton, searchField);
+        Button deleteButton = new Button("Delete Customer");
+        deleteButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 10 20; -fx-cursor: hand;");
+        deleteButton.setOnAction(e -> handleDeleteCustomer(table, data, filteredData));
+
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search by name or email...");
+        searchField.setPrefWidth(250);
+        searchField.setStyle("-fx-padding: 10; -fx-font-size: 13px;");
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            filterCustomers(newVal, data, filteredData);
+        });
+
+        HBox controls = new HBox(15, addButton, editButton, deleteButton, searchField);
+        controls.setStyle("-fx-padding: 15; -fx-background-color: #f5f5f5;");
 
         BorderPane pane = new BorderPane();
         pane.setTop(controls);
         pane.setCenter(table);
+        pane.setStyle("-fx-background-color: white;");
 
         return pane;
+    }
+
+    private void handleAddCustomer(TableView<Customer> table, ObservableList<Customer> data, ObservableList<Customer> filteredData) {
+        Stage stage = (Stage) table.getScene().getWindow();
+        CustomerDialog dialog = new CustomerDialog(stage, null);
+        dialog.showAndWait();
+
+        if (dialog.isConfirmed()) {
+            try (Connection conn = Database.getConnection()) {
+                String sql = "INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)";
+                PreparedStatement pstmt = conn.prepareStatement(sql);
+                pstmt.setString(1, dialog.getCustomerName());
+                pstmt.setString(2, dialog.getEmail());
+                pstmt.setString(3, dialog.getPhone());
+                pstmt.setString(4, dialog.getAddress());
+                pstmt.executeUpdate();
+
+                ObservableList<Customer> newData = getCustomersFromDB();
+                data.clear();
+                data.addAll(newData);
+                filteredData.clear();
+                filteredData.addAll(newData);
+
+                showSuccess("Customer added successfully!");
+            } catch (Exception e) {
+                showError("Error adding customer: " + e.getMessage());
+            }
+        }
+    }
+
+    private void handleEditCustomer(TableView<Customer> table, ObservableList<Customer> data, ObservableList<Customer> filteredData) {
+        Customer selectedCustomer = table.getSelectionModel().getSelectedItem();
+        if (selectedCustomer == null) {
+            showError("Please select a customer to edit!");
+            return;
+        }
+
+        Stage stage = (Stage) table.getScene().getWindow();
+        CustomerDialog dialog = new CustomerDialog(stage, selectedCustomer.getId());
+        dialog.showAndWait();
+
+        if (dialog.isConfirmed()) {
+            try (Connection conn = Database.getConnection()) {
+                String sql = "UPDATE customers SET name = ?, email = ?, phone = ?, address = ? WHERE id = ?";
+                PreparedStatement pstmt = conn.prepareStatement(sql);
+                pstmt.setString(1, dialog.getCustomerName());
+                pstmt.setString(2, dialog.getEmail());
+                pstmt.setString(3, dialog.getPhone());
+                pstmt.setString(4, dialog.getAddress());
+                pstmt.setInt(5, selectedCustomer.getId());
+                pstmt.executeUpdate();
+
+                ObservableList<Customer> newData = getCustomersFromDB();
+                data.clear();
+                data.addAll(newData);
+                filteredData.clear();
+                filteredData.addAll(newData);
+
+                showSuccess("Customer updated successfully!");
+            } catch (Exception e) {
+                showError("Error updating customer: " + e.getMessage());
+            }
+        }
+    }
+
+    private void handleDeleteCustomer(TableView<Customer> table, ObservableList<Customer> data, ObservableList<Customer> filteredData) {
+        Customer selectedCustomer = table.getSelectionModel().getSelectedItem();
+        if (selectedCustomer == null) {
+            showError("Please select a customer to delete!");
+            return;
+        }
+
+        Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmAlert.setTitle("Confirm Deletion");
+        confirmAlert.setHeaderText("Delete Customer: " + selectedCustomer.getName());
+        confirmAlert.setContentText("Are you sure you want to delete this customer? This action cannot be undone.");
+
+        confirmAlert.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                try (Connection conn = Database.getConnection()) {
+                    String sql = "DELETE FROM customers WHERE id = ?";
+                    PreparedStatement pstmt = conn.prepareStatement(sql);
+                    pstmt.setInt(1, selectedCustomer.getId());
+                    pstmt.executeUpdate();
+
+                    data.remove(selectedCustomer);
+                    filteredData.remove(selectedCustomer);
+
+                    showSuccess("Customer deleted successfully!");
+                } catch (Exception e) {
+                    showError("Error deleting customer: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void filterCustomers(String searchText, ObservableList<Customer> data, ObservableList<Customer> filteredData) {
+        filteredData.clear();
+        if (searchText == null || searchText.trim().isEmpty()) {
+            filteredData.addAll(data);
+        } else {
+            String lowerSearch = searchText.toLowerCase();
+            for (Customer customer : data) {
+                if (customer.getName().toLowerCase().contains(lowerSearch) ||
+                    customer.getEmail().toLowerCase().contains(lowerSearch)) {
+                    filteredData.add(customer);
+                }
+            }
+        }
     }
 
     private ObservableList<Customer> getCustomersFromDB() {
