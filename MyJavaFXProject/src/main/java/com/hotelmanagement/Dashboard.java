@@ -50,7 +50,6 @@ public class Dashboard {
         topBar.setSpacing(10);
         topBar.setStyle("-fx-padding: 15; -fx-background-color: #ffffff; -fx-border-color: #e0e0e0; -fx-border-width: 0 0 2 0;");
         topBar.getChildren().addAll(titleLabel, new javafx.scene.layout.Region());
-        HBox.setHgrow(topBar.getChildren().get(1), javafx.geometry.Priority.ALWAYS);
         topBar.getChildren().add(logoutButton);
 
         tabPane.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
